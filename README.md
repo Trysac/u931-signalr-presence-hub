@@ -1,45 +1,56 @@
-# signalr-presence-hub
+# Trysac.SignalrPresenceHub
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/Trysac/u931-signalr-presence-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/Trysac/u931-signalr-presence-hub/actions/workflows/ci.yml)
-
-Track user presence and room membership across server instances through a pluggable backplane, with sequence-checked deltas, snapshot resync and heartbeat expiry
+Track user presence and room membership across server instances through a pluggable backplane, with sequence-checked deltas, snapshot resync and heartbeat expiry.
 
 ## Problem
 
-Describe in two or three sentences the concrete problem this utility solves, who hits it, and what
-they do today without it. Replace this paragraph when the first real feature lands.
+Chat and collaboration applications scaled to multiple SignalR instances frequently report stale user presence status, showing users as online after an instance crashes or offline while they remain connected to another node. This occurs because standard backplanes only forward messages and do not reconcile internal application state. `Trysac.SignalrPresenceHub` maintains a convergent presence view across all nodes using an `IBackplane` interface, utilizing sequence-checked deltas, atomic snapshots, and heartbeat-based expiry to ensure system-wide consistency.
 
-## Install
+## Installation
 
-NuGet package `Trysac.SignalrPresenceHub`. Until it is published to nuget.org, build it from a release
-tag with `dotnet pack src/Library.csproj`, then reference the package:
-
-```xml
-<PackageReference Include="Trysac.SignalrPresenceHub" Version="0.1.0" />
-```
-
-Requires .NET 10 or newer. No dependencies outside the base class library.
+Add the `Trysac.SignalrPresenceHub` package via NuGet.
 
 ## Usage
 
 ```csharp
 using Trysac.SignalrPresenceHub;
 
-// Normalize trims surrounding whitespace and lower-cases the text.
-var name = Text.Normalize("  Hello World "); // "hello world"
-
-// Blank input is rejected explicitly instead of returning an empty string.
-Text.Normalize("   "); // throws BlankInputException ("input is blank")
+var backplane = new InMemoryBackplane();
+var options = new PresenceOptions(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15), () => DateTimeOffset.UtcNow);
+using var nodeA = new PresenceNode("a", backplane, options);
+using var nodeB = new PresenceNode("b", backplane, options);
+nodeA.Start();
+nodeB.Start();
+nodeA.Connect("c1", "ana");
+nodeA.Join("c1", "lobby");
 ```
 
-## Documentation
+## Public API
 
-- [Architecture](docs/ARCHITECTURE.md) and [decisions](docs/decisions/)
-- [Testing](docs/TESTING.md) and [security](docs/SECURITY.md)
-- [Project record](docs/PROJECT.md) and [stack](docs/STACK.md)
-- [Changelog](CHANGELOG.md) and [contributing guide](CONTRIBUTING.md)
+### Core Classes
+- `PresenceNode(string instanceId, IBackplane backplane, PresenceOptions options)`
+  - `void Start()`: Initializes subscription and broadcasts a sync request.
+  - `void Connect(string connectionId, string userId)`: Registers a connection and broadcasts state.
+  - `void Disconnect(string connectionId)`: Removes a connection and broadcasts state.
+  - `void Join(string connectionId, string room)`: Adds connection to room and broadcasts state.
+  - `void Leave(string connectionId, string room)`: Removes connection from room and broadcasts state.
+  - `void Tick()`: Sends heartbeats and expires stale remote instances.
+  - `bool IsOnline(string userId)`: Checks if user has active connections globally.
+  - `IReadOnlyList<string> UsersIn(string room)`: Returns sorted list of users in a room.
+  - `PresenceSnapshot Snapshot()`: Returns an immutable snapshot of all connections and rooms.
+  - `event Action<PresenceEvent>? OnEvent`: Invoked on state transitions.
+- `IBackplane`: Interface for pub/sub transport.
+- `InMemoryBackplane : IBackplane`: Test-oriented implementation with `DuplicateNext()`, `DropNext()`, `Hold()`, and `Release()` for fault injection.
 
-## License
+### Options & Types
+- `PresenceOptions(TimeSpan HeartbeatInterval, TimeSpan InstanceTimeout, Func<DateTimeOffset> Clock, int MaxConnections = 10_000, int MaxRoomsPerConnection = 100)`
+- `PresenceEvent(string Kind, string Room, string UserId, string Reason)`
+- `PresenceException`: Thrown for `duplicate_connection`, `unknown_connection`, `invalid_name`, `too_many_rooms`, `capacity`, `not_started`.
 
-[MIT](LICENSE) (c) 2026 Miguel Gomez
+## Why not SignalR Groups?
+
+SignalR groups are transport-only mechanisms designed for message broadcasting. They cannot be queried to list active members, they do not reconcile state across server restarts or crashes, and they lack visibility into user presence, making them unsuitable for building collaborative presence features.
+
+## Security
+
+See [docs/SECURITY.md](docs/SECURITY.md) for details on the threat model and input validation limits.
