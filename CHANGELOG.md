@@ -9,4 +9,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Added `PresenceNode`, `IBackplane`, `InMemoryBackplane`, `PresenceOptions`, `PresenceEvent`, `PresenceSnapshot`, and `PresenceException` for multi-instance SignalR presence and room tracking.
 - Initial project structure from the factory utility template.
